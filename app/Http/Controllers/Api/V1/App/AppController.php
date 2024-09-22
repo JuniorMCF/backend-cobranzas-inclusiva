@@ -45,19 +45,35 @@ class AppController extends ApiController
 
         if ($socio) {
             $credits = DB::select("
-                SELECT cre.*,
-                per.nom AS nom,
-                tip.nom AS tipo_credito,
-                tc.fecha AS FEC_CUOTA_X_VENCER,
-                WC.Num_cuota as CUOTA_X_VENCER,
-                coalesce(DATEDIFF(DAY, (tc.fecha), getdate()), 0) as DIAS_ATRASO
+                SELECT DISTINCT cre.*,
+                    per.nom AS nom,
+                    tip.nom AS tipo_credito,
+                    CASE
+                        WHEN hc.fechacuotapendiente IS NOT NULL THEN hc.fechacuotapendiente
+                        ELSE cre.fechavencim_original -- usar fechavencim_original si no hay registro en historico
+                    END AS FEC_CUOTA_X_VENCER,
+                    CASE
+                        WHEN hc.numcuotapag IS NOT NULL THEN hc.numcuotapag + 1
+                        ELSE 1
+                    END AS CUOTA_X_VENCER,
+                    COALESCE(DATEDIFF(DAY, hc.fechacuotapendiente, GETDATE()), 0) AS DIAS_ATRASO
                 FROM credito AS cre
                 LEFT JOIN periodicidad AS per ON per.idperiodicidad = cre.idperiodicidadpago
                 LEFT JOIN tipocredito AS tip ON tip.idtipocredito = cre.idtipocredito
-                LEFT JOIN ((select idcredito as idcredito, min(fechacuota) as fecha from credito_por_vencer group by idcredito))  as TC on  TC.idcredito = cre.idcredito
-                LEFT JOIN ((select idcredito as idcredito, min(numcuota) as Num_cuota from credito_por_vencer group by idcredito))  as WC on  WC.idcredito = cre.idcredito
-                WHERE cre.escancelado = 0   and cre.monto <> 0 and cre.esdesembolsado = 1  and cre.esextorno = 0 and cre.idsocio = ?  order by cre.idsocio
-            ", [$socio->idsocio]);
+                LEFT JOIN (
+                    SELECT idcredito, idsocio, fechacuotapendiente, numcuotapag
+                    FROM historico_creditos
+                    WHERE fechareporte = CONVERT(DATE, GETDATE())
+                    AND escierre = 0
+                    AND idsocio = ?
+                ) AS hc ON hc.idcredito = cre.idcredito AND hc.idsocio = cre.idsocio
+                WHERE cre.escancelado = 0
+                AND cre.monto <> 0
+                AND cre.esdesembolsado = 1
+                AND cre.esextorno = 0
+                AND cre.idsocio = ?
+                ORDER BY cre.idsocio
+            ", [$socio->idsocio, $socio->idsocio]);
         }
 
 
@@ -86,7 +102,6 @@ class AppController extends ApiController
 
 
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
-
         $ususariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
 
 
@@ -97,71 +112,81 @@ class AppController extends ApiController
 
         $cobranzas_mercado = [];
 
-        // Obtener el último recibo para el idsocio
-        $lastRecibo = CobranzaMercado::where('idsocio', $idsocio)->max('item') ?? 0;
+        DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza) {
+            $cobranzas_mercado = [];
 
-        // Incrementar el último recibo para el nuevo registro
-        $lastRecibo++;
+            // Obtener el último valor de "item" y bloquear la tabla
+            $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
 
-        // Guardar cobranza de créditos
-        foreach ($idcreditos as $index => $idCredito) {
-            $monto = $montos[$index];
+            // Incrementar el último item
+            $lastItem++;
 
-            if ($monto != 0) {
-                $cobranzaCredito = new CobranzaMercado([
-                    'fecha' => now(),
-                    'item' => $lastRecibo, // Usar el último recibo guardado
+            // Obtener el último número de recibo para el socio
+            $lastRecibo = CobranzaMercado::where('idsocio', $idsocio)->max('recibo') ?? 0;
+
+            // Incrementar el número de recibo por socio
+            $lastRecibo++;
+
+            // Guardar cobranza de créditos
+            foreach ($idcreditos as $index => $idCredito) {
+                $monto = $montos[$index];
+
+                if ($monto != 0) {
+                    $cobranzaCredito = new CobranzaMercado([
+                        'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
+                        'item' => $lastItem,
+                        'idsocio' => $idsocio,
+                        'idcredito' => $idCredito,
+                        'montocredito' => $monto,
+                        'fecharegistro' => Carbon::now()->format('Y-m-d H:i:s'),
+                        'idusuarioregistro' => $ususariocobranza->id_usuario,
+                        'origenaplic' => 1,
+                        'idoficinaregistro' => 1,
+                        'esliquidado' => 0,
+                        'eseliminado' => 0,
+                        'ipregistro' => $request->ip() ?? $request->telefono,
+                        'recibo' => $lastRecibo
+                    ]);
+
+                    $cobranzaCredito->save();
+
+                    // Incrementar el item para el siguiente registro
+                    $lastItem++;
+
+                    $cobranzas_mercado[] = $cobranzaCredito;
+                }
+            }
+
+            // Guardar cobranza de aporte si es mayor que cero
+            if ($aporte > 0) {
+                $cobranza_aporte = new CobranzaMercado([
+                    'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
+                    'item' => $lastItem,
                     'idsocio' => $idsocio,
-                    'idcredito' => $idCredito,
-                    'montocredito' => $monto,
-                    'fecharegistro' => Carbon::now(),
+                    'montoaporte' => $aporte,
+                    'fecharegistro' => Carbon::now()->format('Y-m-d H:i:s'),
                     'idusuarioregistro' => $ususariocobranza->id_usuario,
-                    'origenaplic' => 1
+                    'origenaplic' => 1,
+                    'idoficinaregistro' => 1,
+                    'esliquidado' => 0,
+                    'eseliminado' => 0,
+                    'ipregistro' => $request->ip() ?? $request->telefono,
+                    'recibo' => $lastRecibo
                 ]);
 
-                $cobranzaCredito->save();
-
-
-                $credito = Credit::where('idcredito', $idCredito)->first();
-                if ($credito) {
-                    $cobranzaCredito->moneda = $credito->moneda;
-                }
-
-
-                $cobranzas_mercado[] = $cobranzaCredito;
-
-                // Actualizar el último recibo
-                $lastRecibo++;
+                $cobranza_aporte->save();
             }
-        }
-        $cobranza_aporte = null;
-        // Verificar y guardar cobranza de aporte si es mayor que cero
-        if ($aporte > 0) {
-            $cobranza_aporte = new CobranzaMercado([
-                'fecha' => now(),
-                'item' => $lastRecibo, // Usar el último recibo guardado
-                'idsocio' => $idsocio,
-                'montoaporte' => $aporte,
-                'fecharegistro' => Carbon::now(),
-                'idusuarioregistro' => $ususariocobranza->id_usuario,
-                'origenaplic' => 1
-            ]);
-
-            $cobranza_aporte->save();
-
-
-            $cobranza_aporte->moneda = 1; //soles
-
-        }
+        });
 
         $socio = Socio::where('idsocio', $idsocio)->first();
 
         return $this->successResponse([
             'cobranzas_mercado' => $cobranzas_mercado,
-            'cobranza_aporte' => $cobranza_aporte,
+            'cobranza_aporte' => $cobranza_aporte ?? null,
             'socio' => $socio
         ]);
     }
+
     public function history(Request $request)
     {
 
@@ -178,6 +203,7 @@ class AppController extends ApiController
         $cobranzas_mercado = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
             ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
             ->where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
+            ->where('cobranza_mercado.eseliminado', 0)
             ->select(
                 'cobranza_mercado.*',
                 'credito.moneda as moneda',
@@ -185,7 +211,7 @@ class AppController extends ApiController
                 'socio.ap as ap_socio',
                 'socio.am as am_socio'
             )
-            ->orderBy('cobranza_mercado.fecha','desc')
+            ->orderBy('cobranza_mercado.fecha', 'desc')
             ->orderBy('cobranza_mercado.item', 'desc')
             ->limit(50)
             ->get();
@@ -217,7 +243,7 @@ class AppController extends ApiController
 
         $cobranzas_mercado = [];
 
-        if($socio){
+        if ($socio) {
             $cobranzas_mercado = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
                 ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
                 ->leftJoin("usuario", 'usuario.id_usuario', '=', "cobranza_mercado.idusuarioregistro")
@@ -230,7 +256,7 @@ class AppController extends ApiController
                     'socio.am as am_socio',
                     'usuario.nombrelargo as nom_representante'
                 )
-                ->orderBy('cobranza_mercado.fecha','desc')
+                ->orderBy('cobranza_mercado.fecha', 'desc')
                 ->orderBy('cobranza_mercado.item', 'desc')
                 ->limit(100)
                 ->get();
@@ -238,5 +264,46 @@ class AppController extends ApiController
 
 
         return $this->successResponse($cobranzas_mercado);
+    }
+
+    public function deleteCobranza(Request $request)
+    {
+        // Validamos que se envíen los campos idsocio, idcredito, item e idusuariomodifica
+        $validator = Validator::make($request->all(), [
+            'idsocio' => 'required|exists:socio,idsocio',
+            'idcredito' => 'required|exists:credito,idcredito',
+            'item' => 'required|numeric',
+            'idusuariomodifica' => 'required|exists:usuarios,id_usuario'
+        ]);
+
+        if ($validator->fails()) {
+            return $this->errorResponse($validator->errors()->all(), 422);
+        }
+
+        $idsocio = $request->idsocio;
+        $idcredito = $request->idcredito;
+        $item = $request->item;
+        $idusuariomodifica = $request->idusuariomodifica;
+
+        // Buscar la cobranza por idsocio, idcredito e item
+        $cobranza = CobranzaMercado::where('idsocio', $idsocio)
+            ->where('idcredito', $idcredito)
+            ->where('item', $item)
+            ->first();
+
+        if (!$cobranza) {
+            return $this->errorResponse('Cobranza no encontrada', 404);
+        }
+
+        // Cambiar el estado de eseliminado a 1 y actualizar la información de modificación
+        $cobranza->eseliminado = 1;
+        $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
+        $cobranza->fechamodifica = Carbon::now()->format('Y-m-d H:i:s'); // Actualizar la fecha de modificación
+        $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
+
+        // Guardar los cambios
+        $cobranza->save();
+
+        return $this->successResponse('Cobranza eliminada exitosamente');
     }
 }
