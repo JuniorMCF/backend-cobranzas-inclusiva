@@ -97,7 +97,6 @@ class AppController extends ApiController
         }
 
         $authHeader = $request->header('Authorization');
-
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
 
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
@@ -112,34 +111,57 @@ class AppController extends ApiController
         $totalCobranza = $aporte + array_sum($montos);
 
         $cobranzas_mercado = [];
+        $cobranza_aporte = null;
 
-        DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, $totalCobranza) {
-            $cobranzas_mercado = [];
+        try {
+            DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, $totalCobranza, &$cobranzas_mercado, &$cobranza_aporte) {
+                // Obtener el último valor de "item" y bloquear la tabla
+                $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
+                $lastItem++;
 
-            // Obtener el último valor de "item" y bloquear la tabla
-            $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
+                // Obtener el último número de recibo para el socio
+                $lastRecibo = CobranzaMercado::where('idsocio', $idsocio)->max('recibo') ?? 0;
+                $lastRecibo++;
 
-            // Incrementar el último item
-            $lastItem++;
+                // Guardar cobranza de créditos
+                foreach ($idcreditos as $index => $idCredito) {
+                    $monto = $montos[$index];
 
-            // Obtener el último número de recibo para el socio
-            $lastRecibo = CobranzaMercado::where('idsocio', $idsocio)->max('recibo') ?? 0;
+                    if ($monto != 0) {
+                        $cobranzaCredito = new CobranzaMercado([
+                            'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
+                            'item' => $lastItem,
+                            'idsocio' => $idsocio,
+                            'idcredito' => $idCredito,
+                            'montocredito' => $monto,
+                            'total' => $totalCobranza,  // Guardar el total en cada registro
+                            'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
+                            'idusuarioregistro' => $ususariocobranza->id_usuario,
+                            'origenaplic' => 1,
+                            'idoficinaregistro' => 1,
+                            'esliquidado' => 0,
+                            'eseliminado' => 0,
+                            'ipregistro' => $request->ip() ?? $request->telefono,
+                            'recibo' => $lastRecibo
+                        ]);
 
-            // Incrementar el número de recibo por socio
-            $lastRecibo++;
+                        $cobranzaCredito->save();
 
-            // Guardar cobranza de créditos
-            foreach ($idcreditos as $index => $idCredito) {
-                $monto = $montos[$index];
+                        // Incrementar el item para el siguiente registro
+                        $lastItem++;
 
-                if ($monto != 0) {
-                    $cobranzaCredito = new CobranzaMercado([
+                        $cobranzas_mercado[] = $cobranzaCredito;  // Guardamos el registro en el array para devolverlo
+                    }
+                }
+
+                // Guardar cobranza de aporte si es mayor que cero
+                if ($aporte > 0) {
+                    $cobranza_aporte = new CobranzaMercado([
                         'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
                         'item' => $lastItem,
                         'idsocio' => $idsocio,
-                        'idcredito' => $idCredito,
-                        'montocredito' => $monto,
-                        'total' => $totalCobranza,  // Guardar el total en cada registro
+                        'montoaporte' => $aporte,
+                        'total' => $totalCobranza,  // Guardar el total en el aporte
                         'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                         'idusuarioregistro' => $ususariocobranza->id_usuario,
                         'origenaplic' => 1,
@@ -150,44 +172,22 @@ class AppController extends ApiController
                         'recibo' => $lastRecibo
                     ]);
 
-                    $cobranzaCredito->save();
-
-                    // Incrementar el item para el siguiente registro
-                    $lastItem++;
-
-                    $cobranzas_mercado[] = $cobranzaCredito;
+                    $cobranza_aporte->save();  // Guardamos el registro para devolverlo
                 }
-            }
+            });
 
-            // Guardar cobranza de aporte si es mayor que cero
-            if ($aporte > 0) {
-                $cobranza_aporte = new CobranzaMercado([
-                    'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
-                    'item' => $lastItem,
-                    'idsocio' => $idsocio,
-                    'montoaporte' => $aporte,
-                    'total' => $totalCobranza,  // Guardar el total en el aporte
-                    'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
-                    'idusuarioregistro' => $ususariocobranza->id_usuario,
-                    'origenaplic' => 1,
-                    'idoficinaregistro' => 1,
-                    'esliquidado' => 0,
-                    'eseliminado' => 0,
-                    'ipregistro' => $request->ip() ?? $request->telefono,
-                    'recibo' => $lastRecibo
-                ]);
+            // Obtenemos el socio después de la transacción
+            $socio = Socio::where('idsocio', $idsocio)->first();
 
-                $cobranza_aporte->save();
-            }
-        });
-
-        $socio = Socio::where('idsocio', $idsocio)->first();
-
-        return $this->successResponse([
-            'cobranzas_mercado' => $cobranzas_mercado,
-            'cobranza_aporte' => $cobranza_aporte ?? null,
-            'socio' => $socio
-        ]);
+            return $this->successResponse([
+                'cobranzas_mercado' => $cobranzas_mercado,
+                'cobranza_aporte' => $cobranza_aporte,
+                'socio' => $socio
+            ]);
+        } catch (\Exception $e) {
+            // Si hay algún error, hacemos rollback y devolvemos un mensaje de error
+            return $this->errorResponse('Ocurrió un error al procesar la transacción: ' . $e->getMessage(), 500);
+        }
     }
 
 
