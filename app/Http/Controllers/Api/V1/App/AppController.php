@@ -100,19 +100,20 @@ class AppController extends ApiController
 
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
 
-
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
         $ususariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
-
 
         $aporte = $request->aporte;
         $idcreditos = $request->idcreditos;
         $montos = $request->montos;
         $idsocio = $request->idsocio;
 
+        // Calculamos el total de la cobranza (sumando aportes y montos de créditos)
+        $totalCobranza = $aporte + array_sum($montos);
+
         $cobranzas_mercado = [];
 
-        DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza) {
+        DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, $totalCobranza) {
             $cobranzas_mercado = [];
 
             // Obtener el último valor de "item" y bloquear la tabla
@@ -138,6 +139,7 @@ class AppController extends ApiController
                         'idsocio' => $idsocio,
                         'idcredito' => $idCredito,
                         'montocredito' => $monto,
+                        'total' => $totalCobranza,  // Guardar el total en cada registro
                         'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                         'idusuarioregistro' => $ususariocobranza->id_usuario,
                         'origenaplic' => 1,
@@ -164,6 +166,7 @@ class AppController extends ApiController
                     'item' => $lastItem,
                     'idsocio' => $idsocio,
                     'montoaporte' => $aporte,
+                    'total' => $totalCobranza,  // Guardar el total en el aporte
                     'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                     'idusuarioregistro' => $ususariocobranza->id_usuario,
                     'origenaplic' => 1,
@@ -186,6 +189,7 @@ class AppController extends ApiController
             'socio' => $socio
         ]);
     }
+
 
     public function history(Request $request)
     {
@@ -295,14 +299,24 @@ class AppController extends ApiController
             return $this->errorResponse('Cobranza no encontrada', 404);
         }
 
+        // Obtenemos el recibo de la cobranza
+        $recibo = $cobranza->recibo;
+
+        // Sumamos el monto que se va a eliminar (monto total registrado en ese ítem)
+        $montoEliminar = $cobranza->montocredito ?? $cobranza->montoaporte;
+
         // Cambiar el estado de eseliminado a 1 y actualizar la información de modificación
         $cobranza->eseliminado = 1;
         $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
         $cobranza->fechamodifica = Carbon::now()->format('d/m/Y H:i:s'); // Actualizar la fecha de modificación
         $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
-
-        // Guardar los cambios
         $cobranza->save();
+
+        // Actualizamos el total en todos los registros asociados al mismo recibo
+        CobranzaMercado::where('recibo', $recibo)
+            ->where('idsocio', $idsocio)
+            ->where('eseliminado', 0) // Sólo registros activos
+            ->update(['total' => DB::raw("total - $montoEliminar")]);
 
         return $this->successResponse('Cobranza eliminada exitosamente');
     }
