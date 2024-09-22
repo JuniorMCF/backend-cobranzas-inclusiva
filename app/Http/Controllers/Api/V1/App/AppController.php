@@ -133,12 +133,12 @@ class AppController extends ApiController
 
                 if ($monto != 0) {
                     $cobranzaCredito = new CobranzaMercado([
-                        'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
+                        'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
                         'item' => $lastItem,
                         'idsocio' => $idsocio,
                         'idcredito' => $idCredito,
                         'montocredito' => $monto,
-                        'fecharegistro' => Carbon::now()->format('Y-m-d H:i:s'),
+                        'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                         'idusuarioregistro' => $ususariocobranza->id_usuario,
                         'origenaplic' => 1,
                         'idoficinaregistro' => 1,
@@ -160,11 +160,11 @@ class AppController extends ApiController
             // Guardar cobranza de aporte si es mayor que cero
             if ($aporte > 0) {
                 $cobranza_aporte = new CobranzaMercado([
-                    'fecha' => Carbon::now()->format('Y-m-d H:i:s'),
+                    'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
                     'item' => $lastItem,
                     'idsocio' => $idsocio,
                     'montoaporte' => $aporte,
-                    'fecharegistro' => Carbon::now()->format('Y-m-d H:i:s'),
+                    'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                     'idusuarioregistro' => $ususariocobranza->id_usuario,
                     'origenaplic' => 1,
                     'idoficinaregistro' => 1,
@@ -298,7 +298,7 @@ class AppController extends ApiController
         // Cambiar el estado de eseliminado a 1 y actualizar la información de modificación
         $cobranza->eseliminado = 1;
         $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
-        $cobranza->fechamodifica = Carbon::now()->format('Y-m-d H:i:s'); // Actualizar la fecha de modificación
+        $cobranza->fechamodifica = Carbon::now()->format('d/m/Y H:i:s'); // Actualizar la fecha de modificación
         $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
 
         // Guardar los cambios
