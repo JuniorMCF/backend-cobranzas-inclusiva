@@ -177,8 +177,11 @@ class AppController extends ApiController
             // Obtenemos el socio después de la transacción
             $socio = Socio::where('idsocio', $idsocio)->first();
 
-            // Extraemos el representante de uno de los registros de cobranza
-            $representante = $cobranzas_mercado[0]->idusuarioregistro ?? 'N/A';
+            // Buscar el representante (usuario) por el campo idusuarioregistro
+            $representante = Usuario::where('id_usuario', $cobranzas_mercado[0]->idusuarioregistro)
+                ->select('nombrelargo as nom_representante')
+                ->first()
+                ->nom_representante ?? 'N/A';
 
             // Devolver los datos en el formato de la cobranza
             return $this->successResponse([
@@ -191,7 +194,7 @@ class AppController extends ApiController
                 'moneda' => '1', // Puedes ajustar según la moneda que necesites (1: soles, 2: dólares)
                 'total' => $totalRecibo, // Total del recibo
                 'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
-                'representante' => $representante, // Representante extraído
+                'representante' => $representante, // Nombre del representante extraído
                 'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                 'detalles' => $cobranzas_mercado, // Detalles de las cobranzas, incluyendo créditos y aporte
                 'socio' => $socio
@@ -225,6 +228,7 @@ class AppController extends ApiController
         foreach ($recibos as $recibo) {
             $detallesCobranza = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
                 ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
+                ->leftJoin("usuario", 'usuario.id_usuario', '=', "cobranza_mercado.idusuarioregistro")
                 ->where('cobranza_mercado.recibo', $recibo->recibo)
                 ->where('cobranza_mercado.idsocio', $recibo->idsocio)
                 ->where('cobranza_mercado.eseliminado', 0)
@@ -233,7 +237,8 @@ class AppController extends ApiController
                     'credito.moneda as moneda',
                     'socio.nom as nom_socio',
                     'socio.ap as ap_socio',
-                    'socio.am as am_socio'
+                    'socio.am as am_socio',
+                    'usuario.nombrelargo as nom_representante'
                 )
                 ->orderBy('cobranza_mercado.item', 'desc')
                 ->get();
