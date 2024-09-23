@@ -107,11 +107,14 @@ class AppController extends ApiController
         $montos = $request->montos;
         $idsocio = $request->idsocio;
 
+        $totalRecibo = $aporte + array_sum($montos); // Suma total del recibo
+
         $cobranzas_mercado = [];
         $cobranza_aporte = null;
+        $lastRecibo = 0; // Variable para almacenar el número de recibo
 
         try {
-            DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, &$cobranzas_mercado, &$cobranza_aporte) {
+            DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, &$cobranzas_mercado, &$cobranza_aporte, &$lastRecibo, &$totalRecibo) {
                 // Obtener el último valor de "item" y bloquear la tabla
                 $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
                 $lastItem++;
@@ -170,12 +173,22 @@ class AppController extends ApiController
                 }
             });
 
+            // Obtenemos el socio después de la transacción
             $socio = Socio::where('idsocio', $idsocio)->first();
 
+            // Devolver los datos en el formato de la cobranza
             return $this->successResponse([
-                'cobranzas_mercado' => $cobranzas_mercado,
-                'cobranza_aporte' => $cobranza_aporte,
-                'socio' => $socio
+                'recibo' => $lastRecibo,
+                'idsocio' => $socio->idsocio,
+                'nom_socio' => $socio->nom ?? '',
+                'ap_socio' => $socio->ap ?? '',
+                'am_socio' => $socio->am ?? '',
+                'tipo' => $aporte > 0 ? ($totalRecibo == $aporte ? 'APORTE' : 'CRÉDITO + APORTE') : 'CRÉDITO', // Tipo
+                'moneda' => '1', // Puedes ajustar según la moneda que necesites (1: soles, 2: dólares)
+                'total' => $totalRecibo, // Total del recibo
+                'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
+                'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
+                'detalles' => $cobranzas_mercado // Detalles de las cobranzas
             ]);
         } catch (\Exception $e) {
             return $this->errorResponse('Ocurrió un error al procesar la transacción: ' . $e->getMessage(), 500);
