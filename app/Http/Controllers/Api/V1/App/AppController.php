@@ -301,7 +301,9 @@ class AppController extends ApiController
                         'socio.nom as nom_socio',
                         'socio.ap as ap_socio',
                         'socio.am as am_socio',
-                        'usuario.nombrelargo as nom_representante'
+                        'usuario.nom as nom_usuario',
+                        'usuario.ap as ap_usuario',
+                        'usuario.am as am_usuario'
                     )
                     ->orderBy('cobranza_mercado.item', 'desc')
                     ->get();
@@ -313,7 +315,12 @@ class AppController extends ApiController
                 $moneda = $detallesCobranza->first()->moneda ?? 'N/A'; // Moneda del primer registro
                 $total = $detallesCobranza->first()->total ?? 0; // Total del primer registro
 
-                // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo y el total
+                // Concatenar el nombre completo del representante
+                $representante = $detallesCobranza->first()->nom_usuario . ' ' .
+                    $detallesCobranza->first()->ap_usuario . ' ' .
+                    $detallesCobranza->first()->am_usuario;
+
+                // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo, el total y el representante
                 $cobranzas_agrupadas[] = [
                     'recibo' => $recibo->recibo,
                     'idsocio' => $recibo->idsocio,
@@ -323,6 +330,7 @@ class AppController extends ApiController
                     'tipo' => $tipoCobranza, // Tipo de cobranza (Crédito, Aporte o ambos)
                     'moneda' => $moneda, // Moneda
                     'total' => $total, // Total
+                    'representante' => $representante, // Nombre completo del representante
                     'detalles' => $detallesCobranza, // Detalles de las cobranzas
                 ];
             }
