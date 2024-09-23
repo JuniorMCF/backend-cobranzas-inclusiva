@@ -177,6 +177,9 @@ class AppController extends ApiController
             // Obtenemos el socio después de la transacción
             $socio = Socio::where('idsocio', $idsocio)->first();
 
+            // Extraemos el representante de uno de los registros de cobranza
+            $representante = $cobranzas_mercado[0]->idusuarioregistro ?? 'N/A';
+
             // Devolver los datos en el formato de la cobranza
             return $this->successResponse([
                 'recibo' => $lastRecibo,
@@ -188,7 +191,7 @@ class AppController extends ApiController
                 'moneda' => '1', // Puedes ajustar según la moneda que necesites (1: soles, 2: dólares)
                 'total' => $totalRecibo, // Total del recibo
                 'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
-                'representante' => $detallesCobranza->first()->nom_representante ?? 'N/A', // Representante
+                'representante' => $representante, // Representante extraído
                 'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                 'detalles' => $cobranzas_mercado, // Detalles de las cobranzas, incluyendo créditos y aporte
                 'socio' => $socio
