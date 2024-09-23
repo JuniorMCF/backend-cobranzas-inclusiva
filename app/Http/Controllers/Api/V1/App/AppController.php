@@ -204,7 +204,7 @@ class AppController extends ApiController
         // Obtener todos los recibos únicos agrupados por idsocio y recibo
         $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
             ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
-            ->select('recibo', 'idsocio', 'fecha') // Seleccionar recibo e idsocio
+            ->select('recibo', 'idsocio', 'fecha', 'fecharegistro') // Seleccionar recibo, idsocio, fecha y fecharegistro
             ->distinct() // Asegurarse de no repetir
             ->orderBy('cobranza_mercado.fecha', 'desc') // Ordenar por la fecha más reciente
             ->limit(50) // Limitar a los 50 recibos más recientes
@@ -234,10 +234,10 @@ class AppController extends ApiController
             $tipoCobranza = $this->determinarTipoCobranza($detallesCobranza);
 
             // Obtener la moneda y el total desde cualquier registro válido
-            $moneda = $detallesCobranza->first()->moneda ?? '1'; // Moneda del primer registro  1 : soles 2 : dolares
+            $moneda = $detallesCobranza->first()->moneda ?? '1'; // Moneda del primer registro (1: soles, 2: dólares)
             $total = $detallesCobranza->first()->total ?? 0; // Total del primer registro
 
-            // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo y el total
+            // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo, el total y las fechas
             $historial[] = [
                 'recibo' => $recibo->recibo,
                 'idsocio' => $recibo->idsocio,
@@ -247,6 +247,8 @@ class AppController extends ApiController
                 'tipo' => $tipoCobranza, // Tipo de cobranza (Crédito, Aporte o ambos)
                 'moneda' => $moneda, // Moneda
                 'total' => $total, // Total
+                'fecha' => $recibo->fecha, // Fecha del recibo
+                'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null, // Fecha de registro
                 'detalles' => $detallesCobranza, // Detalles de las cobranzas
             ];
         }
@@ -281,7 +283,7 @@ class AppController extends ApiController
             // Obtener todos los recibos únicos agrupados por idsocio y recibo
             $recibos = CobranzaMercado::where('cobranza_mercado.idsocio', $socio->idsocio)
                 ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
-                ->select('recibo', 'idsocio', 'fecha') // Seleccionar recibo, idsocio y fecha
+                ->select('recibo', 'idsocio', 'fecha', 'fecharegistro') // Seleccionar recibo, idsocio, fecha y fecharegistro
                 ->distinct() // Asegurarse de no repetir recibos
                 ->orderBy('fecha', 'desc') // Ordenar por la fecha más reciente
                 ->limit(100) // Limitar a los 100 recibos más recientes
@@ -324,6 +326,8 @@ class AppController extends ApiController
                     'moneda' => $moneda, // Moneda
                     'total' => $total, // Total
                     'representante' => $detallesCobranza->first()->nom_representante ?? 'N/A', // Representante
+                    'fecha' => $recibo->fecha, // Fecha
+                    'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null, // Fecha de registro
                     'detalles' => $detallesCobranza, // Detalles de las cobranzas
                 ];
             }
@@ -331,7 +335,6 @@ class AppController extends ApiController
 
         return $this->successResponse($cobranzas_agrupadas);
     }
-
 
     public function deleteCobranza(Request $request)
     {
