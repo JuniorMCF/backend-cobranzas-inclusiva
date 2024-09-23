@@ -107,14 +107,11 @@ class AppController extends ApiController
         $montos = $request->montos;
         $idsocio = $request->idsocio;
 
-        // Calculamos el total de la cobranza (sumando aportes y montos de créditos)
-        $totalCobranza = $aporte + array_sum($montos);
-
         $cobranzas_mercado = [];
         $cobranza_aporte = null;
 
         try {
-            DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, $totalCobranza, &$cobranzas_mercado, &$cobranza_aporte) {
+            DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, &$cobranzas_mercado, &$cobranza_aporte) {
                 // Obtener el último valor de "item" y bloquear la tabla
                 $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
                 $lastItem++;
@@ -134,7 +131,7 @@ class AppController extends ApiController
                             'idsocio' => $idsocio,
                             'idcredito' => $idCredito,
                             'montocredito' => $monto,
-                            'total' => $totalCobranza,  // Guardar el total en cada registro
+                            'total' => $monto,  // Guardar solo el monto de este registro
                             'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                             'idusuarioregistro' => $ususariocobranza->id_usuario,
                             'origenaplic' => 1,
@@ -146,11 +143,8 @@ class AppController extends ApiController
                         ]);
 
                         $cobranzaCredito->save();
-
-                        // Incrementar el item para el siguiente registro
                         $lastItem++;
-
-                        $cobranzas_mercado[] = $cobranzaCredito;  // Guardamos el registro en el array para devolverlo
+                        $cobranzas_mercado[] = $cobranzaCredito;
                     }
                 }
 
@@ -161,7 +155,7 @@ class AppController extends ApiController
                         'item' => $lastItem,
                         'idsocio' => $idsocio,
                         'montoaporte' => $aporte,
-                        'total' => $totalCobranza,  // Guardar el total en el aporte
+                        'total' => $aporte,  // Guardar el aporte como total
                         'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
                         'idusuarioregistro' => $ususariocobranza->id_usuario,
                         'origenaplic' => 1,
@@ -172,11 +166,10 @@ class AppController extends ApiController
                         'recibo' => $lastRecibo
                     ]);
 
-                    $cobranza_aporte->save();  // Guardamos el registro para devolverlo
+                    $cobranza_aporte->save();
                 }
             });
 
-            // Obtenemos el socio después de la transacción
             $socio = Socio::where('idsocio', $idsocio)->first();
 
             return $this->successResponse([
@@ -185,7 +178,6 @@ class AppController extends ApiController
                 'socio' => $socio
             ]);
         } catch (\Exception $e) {
-            // Si hay algún error, hacemos rollback y devolvemos un mensaje de error
             return $this->errorResponse('Ocurrió un error al procesar la transacción: ' . $e->getMessage(), 500);
         }
     }
@@ -203,23 +195,21 @@ class AppController extends ApiController
 
         // Obtener todos los recibos únicos agrupados por idsocio y recibo
         $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
-            ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
-            ->select('recibo', 'idsocio', 'fecha', 'fecharegistro') // Seleccionar recibo, idsocio, fecha y fecharegistro
-            ->distinct() // Asegurarse de no repetir
-            ->orderBy('cobranza_mercado.fecha', 'desc') // Ordenar por la fecha más reciente
-            ->limit(50) // Limitar a los 50 recibos más recientes
+            ->where('cobranza_mercado.eseliminado', 0)
+            ->select('recibo', 'idsocio', 'fecha', 'fecharegistro')
+            ->distinct()
+            ->orderBy('cobranza_mercado.fecha', 'desc')
+            ->limit(50)
             ->get();
 
-        // Inicializar array para almacenar el historial por recibo
         $historial = [];
 
-        // Recorrer los recibos y obtener los detalles de las cobranzas asociadas a cada uno
         foreach ($recibos as $recibo) {
             $detallesCobranza = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
                 ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
-                ->where('cobranza_mercado.recibo', $recibo->recibo) // Filtrar por recibo
-                ->where('cobranza_mercado.idsocio', $recibo->idsocio) // Filtrar por socio
-                ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+                ->where('cobranza_mercado.recibo', $recibo->recibo)
+                ->where('cobranza_mercado.idsocio', $recibo->idsocio)
+                ->where('cobranza_mercado.eseliminado', 0)
                 ->select(
                     'cobranza_mercado.*',
                     'credito.moneda as moneda',
@@ -230,31 +220,29 @@ class AppController extends ApiController
                 ->orderBy('cobranza_mercado.item', 'desc')
                 ->get();
 
-            // Calcular el tipo de cobranza
             $tipoCobranza = $this->determinarTipoCobranza($detallesCobranza);
 
-            // Obtener la moneda y el total desde cualquier registro válido
-            $moneda = $detallesCobranza->first()->moneda ?? '1'; // Moneda del primer registro (1: soles, 2: dólares)
-            $total = $detallesCobranza->first()->total ?? 0; // Total del primer registro
+            // Sumar los totales de los registros asociados al recibo
+            $totalRecibo = $detallesCobranza->sum('total');
 
-            // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo, el total y las fechas
             $historial[] = [
                 'recibo' => $recibo->recibo,
                 'idsocio' => $recibo->idsocio,
                 'nom_socio' => $detallesCobranza->first()->nom_socio ?? '',
                 'ap_socio' => $detallesCobranza->first()->ap_socio ?? '',
                 'am_socio' => $detallesCobranza->first()->am_socio ?? '',
-                'tipo' => $tipoCobranza, // Tipo de cobranza (Crédito, Aporte o ambos)
-                'moneda' => $moneda, // Moneda
-                'total' => $total, // Total
-                'fecha' => $recibo->fecha, // Fecha del recibo
-                'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null, // Fecha de registro
-                'detalles' => $detallesCobranza, // Detalles de las cobranzas
+                'tipo' => $tipoCobranza,
+                'moneda' => $detallesCobranza->first()->moneda ?? '1', // Moneda del primer registro
+                'total' => $totalRecibo, // Total del recibo
+                'fecha' => $recibo->fecha,
+                'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null,
+                'detalles' => $detallesCobranza,
             ];
         }
 
         return $this->successResponse($historial);
     }
+
 
 
     public function searchCobranza(Request $request)
@@ -271,7 +259,7 @@ class AppController extends ApiController
 
         // Buscar al socio por dni o idsocio
         $socio = Socio::where(function ($query) use ($searchTerm) {
-            $query->where('dni', '=',  $searchTerm)
+            $query->where('dni', '=', $searchTerm)
                 ->orWhere('idsocio', '=', $searchTerm);
         })
             ->where('idtipopersona', 1) // socios
@@ -284,9 +272,9 @@ class AppController extends ApiController
             $recibos = CobranzaMercado::where('cobranza_mercado.idsocio', $socio->idsocio)
                 ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
                 ->select('recibo', 'idsocio', 'fecha', 'fecharegistro') // Seleccionar recibo, idsocio, fecha y fecharegistro
-                ->distinct() // Asegurarse de no repetir recibos
-                ->orderBy('fecha', 'desc') // Ordenar por la fecha más reciente
-                ->limit(100) // Limitar a los 100 recibos más recientes
+                ->distinct()
+                ->orderBy('fecha', 'desc')
+                ->limit(100)
                 ->get();
 
             // Recorrer los recibos y obtener los detalles de las cobranzas asociadas a cada uno
@@ -294,9 +282,9 @@ class AppController extends ApiController
                 $detallesCobranza = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
                     ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
                     ->leftJoin("usuario", 'usuario.id_usuario', '=', "cobranza_mercado.idusuarioregistro")
-                    ->where('cobranza_mercado.recibo', $recibo->recibo) // Filtrar por recibo
-                    ->where('cobranza_mercado.idsocio', $recibo->idsocio) // Filtrar por socio
-                    ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+                    ->where('cobranza_mercado.recibo', $recibo->recibo)
+                    ->where('cobranza_mercado.idsocio', $recibo->idsocio)
+                    ->where('cobranza_mercado.eseliminado', 0)
                     ->select(
                         'cobranza_mercado.*',
                         'credito.moneda as moneda',
@@ -311,9 +299,8 @@ class AppController extends ApiController
                 // Calcular el tipo de cobranza
                 $tipoCobranza = $this->determinarTipoCobranza($detallesCobranza);
 
-                // Obtener la moneda y el total desde cualquier registro válido
-                $moneda = $detallesCobranza->first()->moneda ?? 'N/A'; // Moneda del primer registro
-                $total = $detallesCobranza->first()->total ?? 0; // Total del primer registro
+                // Sumar los totales de los registros asociados al recibo
+                $totalRecibo = $detallesCobranza->sum('total');
 
                 // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo, el total y el representante
                 $cobranzas_agrupadas[] = [
@@ -323,8 +310,8 @@ class AppController extends ApiController
                     'ap_socio' => $detallesCobranza->first()->ap_socio ?? '',
                     'am_socio' => $detallesCobranza->first()->am_socio ?? '',
                     'tipo' => $tipoCobranza, // Tipo de cobranza (Crédito, Aporte o ambos)
-                    'moneda' => $moneda, // Moneda
-                    'total' => $total, // Total
+                    'moneda' => $detallesCobranza->first()->moneda ?? 'N/A', // Moneda del primer registro
+                    'total' => $totalRecibo, // Sumar el total de los registros asociados al recibo
                     'representante' => $detallesCobranza->first()->nom_representante ?? 'N/A', // Representante
                     'fecha' => $recibo->fecha, // Fecha
                     'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null, // Fecha de registro
