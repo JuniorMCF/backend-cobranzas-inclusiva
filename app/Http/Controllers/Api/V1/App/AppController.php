@@ -253,7 +253,7 @@ class AppController extends ApiController
                 'moneda' => $detallesCobranza->first()->moneda ?? '1', // Moneda del primer registro
                 'total' => $totalRecibo, // Total del recibo
                 'fecha' => $recibo->fecha,
-                'representante' => $ususariocobranza->nom_representante ?? 'N/A', // Representante
+                'representante' => $detallesCobranza->first()->nom_representante ?? 'N/A', // Representante
                 'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null,
                 'detalles' => $detallesCobranza,
             ];
