@@ -193,37 +193,52 @@ class AppController extends ApiController
 
     public function history(Request $request)
     {
-
+        // Obtener el usuario desde el header Authorization
         $authHeader = $request->header('Authorization');
-
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
 
-
+        // Obtener información del usuario y cobranza
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
-
         $ususariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
 
-
-        $cobranzas_mercado = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
-            ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
-            ->where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
-            ->where('cobranza_mercado.eseliminado', 0)
-            ->select(
-                'cobranza_mercado.*',
-                'credito.moneda as moneda',
-                'socio.nom as nom_socio',
-                'socio.ap as ap_socio',
-                'socio.am as am_socio'
-            )
-            ->orderBy('cobranza_mercado.fecha', 'desc')
-            ->orderBy('cobranza_mercado.item', 'desc')
-            ->limit(50)
+        // Obtener todos los recibos únicos agrupados por idsocio y recibo
+        $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
+            ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+            ->select('recibo', 'idsocio') // Seleccionar recibo e idsocio
+            ->distinct() // Asegurarse de no repetir
+            ->orderBy('cobranza_mercado.fecha', 'desc') // Ordenar por la fecha más reciente
+            ->limit(50) // Limitar a los 50 recibos más recientes
             ->get();
 
+        // Inicializar array para almacenar el historial por recibo
+        $historial = [];
 
+        // Recorrer los recibos y obtener los detalles de las cobranzas asociadas a cada uno
+        foreach ($recibos as $recibo) {
+            $detallesCobranza = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
+                ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
+                ->where('cobranza_mercado.recibo', $recibo->recibo) // Filtrar por recibo
+                ->where('cobranza_mercado.idsocio', $recibo->idsocio) // Filtrar por socio
+                ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+                ->select(
+                    'cobranza_mercado.*',
+                    'credito.moneda as moneda',
+                    'socio.nom as nom_socio',
+                    'socio.ap as ap_socio',
+                    'socio.am as am_socio'
+                )
+                ->orderBy('cobranza_mercado.item', 'desc')
+                ->get();
 
+            // Guardar el recibo, el socio y los detalles de la cobranza asociados
+            $historial[] = [
+                'recibo' => $recibo->recibo,
+                'socio' => $recibo->idsocio,
+                'detalles' => $detallesCobranza,
+            ];
+        }
 
-        return $this->successResponse($cobranzas_mercado);
+        return $this->successResponse($historial);
     }
 
     public function searchCobranza(Request $request)
@@ -237,7 +252,7 @@ class AppController extends ApiController
         }
         $searchTerm = $request->search;
 
-        /**buscamos al socio por dni o idsocio */
+        // Buscar al socio por dni o idsocio
         $socio = Socio::where(function ($query) use ($searchTerm) {
             $query->where('dni', '=',  $searchTerm)
                 ->orWhere('idsocio', '=', $searchTerm);
@@ -245,29 +260,47 @@ class AppController extends ApiController
             ->where('idtipopersona', 1) // socios
             ->first();
 
-        $cobranzas_mercado = [];
+        $cobranzas_agrupadas = [];
 
         if ($socio) {
-            $cobranzas_mercado = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
-                ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
-                ->leftJoin("usuario", 'usuario.id_usuario', '=', "cobranza_mercado.idusuarioregistro")
-                ->where('cobranza_mercado.idsocio', $socio->idsocio)
-                ->select(
-                    'cobranza_mercado.*',
-                    'credito.moneda as moneda',
-                    'socio.nom as nom_socio',
-                    'socio.ap as ap_socio',
-                    'socio.am as am_socio',
-                    'usuario.nombrelargo as nom_representante'
-                )
-                ->orderBy('cobranza_mercado.fecha', 'desc')
-                ->orderBy('cobranza_mercado.item', 'desc')
-                ->limit(100)
+            // Obtener todos los recibos únicos agrupados por idsocio y recibo
+            $recibos = CobranzaMercado::where('cobranza_mercado.idsocio', $socio->idsocio)
+                ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+                ->select('recibo', 'idsocio') // Seleccionar recibo e idsocio
+                ->distinct() // Asegurarse de no repetir recibos
+                ->orderBy('cobranza_mercado.fecha', 'desc') // Ordenar por la fecha más reciente
+                ->limit(100) // Limitar a los 100 recibos más recientes
                 ->get();
+
+            // Recorrer los recibos y obtener los detalles de las cobranzas asociadas a cada uno
+            foreach ($recibos as $recibo) {
+                $detallesCobranza = CobranzaMercado::leftJoin("credito", 'credito.idcredito', '=', "cobranza_mercado.idcredito")
+                    ->leftJoin("socio", 'socio.idsocio', '=', "cobranza_mercado.idsocio")
+                    ->leftJoin("usuario", 'usuario.id_usuario', '=', "cobranza_mercado.idusuarioregistro")
+                    ->where('cobranza_mercado.recibo', $recibo->recibo) // Filtrar por recibo
+                    ->where('cobranza_mercado.idsocio', $recibo->idsocio) // Filtrar por socio
+                    ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+                    ->select(
+                        'cobranza_mercado.*',
+                        'credito.moneda as moneda',
+                        'socio.nom as nom_socio',
+                        'socio.ap as ap_socio',
+                        'socio.am as am_socio',
+                        'usuario.nombrelargo as nom_representante'
+                    )
+                    ->orderBy('cobranza_mercado.item', 'desc')
+                    ->get();
+
+                // Guardar el recibo, el socio y los detalles de la cobranza asociados
+                $cobranzas_agrupadas[] = [
+                    'recibo' => $recibo->recibo,
+                    'socio' => $recibo->idsocio,
+                    'detalles' => $detallesCobranza,
+                ];
+            }
         }
 
-
-        return $this->successResponse($cobranzas_mercado);
+        return $this->successResponse($cobranzas_agrupadas);
     }
 
     public function deleteCobranza(Request $request)
