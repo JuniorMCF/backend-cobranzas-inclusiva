@@ -368,12 +368,6 @@ class AppController extends ApiController
             return $this->errorResponse('Cobranza no encontrada', 404);
         }
 
-        // Obtenemos el recibo de la cobranza
-        $recibo = $cobranza->recibo;
-
-        // Sumamos el monto que se va a eliminar (monto total registrado en ese ítem)
-        $montoEliminar = $cobranza->montocredito ?? $cobranza->montoaporte;
-
         // Cambiar el estado de eseliminado a 1 y actualizar la información de modificación
         $cobranza->eseliminado = 1;
         $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
@@ -381,11 +375,7 @@ class AppController extends ApiController
         $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
         $cobranza->save();
 
-        // Actualizamos el total en todos los registros asociados al mismo recibo
-        CobranzaMercado::where('recibo', $recibo)
-            ->where('idsocio', $idsocio)
-            ->where('eseliminado', 0) // Sólo registros activos
-            ->update(['total' => DB::raw("total - $montoEliminar")]);
+        // No se actualizará el total, solo se marca como eliminado
 
         return $this->successResponse('Cobranza eliminada exitosamente');
     }
