@@ -204,7 +204,7 @@ class AppController extends ApiController
         // Obtener todos los recibos únicos agrupados por idsocio y recibo
         $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
             ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
-            ->select('recibo', 'idsocio') // Seleccionar recibo e idsocio
+            ->select('recibo', 'idsocio','fecha') // Seleccionar recibo e idsocio
             ->distinct() // Asegurarse de no repetir
             ->orderBy('cobranza_mercado.fecha', 'desc') // Ordenar por la fecha más reciente
             ->limit(50) // Limitar a los 50 recibos más recientes
@@ -265,12 +265,12 @@ class AppController extends ApiController
         if ($socio) {
             // Obtener todos los recibos únicos agrupados por idsocio y recibo
             $recibos = CobranzaMercado::where('cobranza_mercado.idsocio', $socio->idsocio)
-                ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
-                ->select('recibo', 'idsocio') // Seleccionar recibo e idsocio
-                ->distinct() // Asegurarse de no repetir recibos
-                ->orderBy('cobranza_mercado.fecha', 'desc') // Ordenar por la fecha más reciente
-                ->limit(100) // Limitar a los 100 recibos más recientes
-                ->get();
+                    ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+                    ->select('recibo', 'idsocio', 'fecha') // Seleccionar recibo, idsocio y fecha
+                    ->distinct() // Asegurarse de no repetir recibos
+                    ->orderBy('fecha', 'desc') // Ordenar por la fecha más reciente
+                    ->limit(100) // Limitar a los 100 recibos más recientes
+                    ->get();
 
             // Recorrer los recibos y obtener los detalles de las cobranzas asociadas a cada uno
             foreach ($recibos as $recibo) {
