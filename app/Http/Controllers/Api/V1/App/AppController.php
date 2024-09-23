@@ -234,7 +234,7 @@ class AppController extends ApiController
             $tipoCobranza = $this->determinarTipoCobranza($detallesCobranza);
 
             // Obtener la moneda y el total desde cualquier registro válido
-            $moneda = $detallesCobranza->first()->moneda ?? 'N/A'; // Moneda del primer registro
+            $moneda = $detallesCobranza->first()->moneda ?? '1'; // Moneda del primer registro  1 : soles 2 : dolares
             $total = $detallesCobranza->first()->total ?? 0; // Total del primer registro
 
             // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo y el total
