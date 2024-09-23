@@ -204,7 +204,7 @@ class AppController extends ApiController
         // Obtener todos los recibos únicos agrupados por idsocio y recibo
         $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
             ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
-            ->select('recibo', 'idsocio','fecha') // Seleccionar recibo e idsocio
+            ->select('recibo', 'idsocio', 'fecha') // Seleccionar recibo e idsocio
             ->distinct() // Asegurarse de no repetir
             ->orderBy('cobranza_mercado.fecha', 'desc') // Ordenar por la fecha más reciente
             ->limit(50) // Limitar a los 50 recibos más recientes
@@ -230,15 +230,54 @@ class AppController extends ApiController
                 ->orderBy('cobranza_mercado.item', 'desc')
                 ->get();
 
-            // Guardar el recibo, el socio y los detalles de la cobranza asociados
+            // Calcular el tipo de cobranza
+            $tipoCobranza = $this->determinarTipoCobranza($detallesCobranza);
+
+            // Obtener la moneda y el total desde cualquier registro válido
+            $moneda = $detallesCobranza->first()->moneda ?? 'N/A'; // Moneda del primer registro
+            $total = $detallesCobranza->first()->total ?? 0; // Total del primer registro
+
+            // Guardar el recibo, el socio, los detalles de la cobranza asociados, el tipo y el total
             $historial[] = [
                 'recibo' => $recibo->recibo,
-                'socio' => $recibo->idsocio,
-                'detalles' => $detallesCobranza,
+                'idsocio' => $recibo->idsocio,
+                'nom_socio' => $detallesCobranza->first()->nom_socio ?? '',
+                'ap_socio' => $detallesCobranza->first()->ap_socio ?? '',
+                'am_socio' => $detallesCobranza->first()->am_socio ?? '',
+                'tipo' => $tipoCobranza, // Tipo de cobranza (Crédito, Aporte o ambos)
+                'moneda' => $moneda, // Moneda
+                'total' => $total, // Total
+                'detalles' => $detallesCobranza, // Detalles de las cobranzas
             ];
         }
 
         return $this->successResponse($historial);
+    }
+
+    // Función para determinar el tipo de cobranza
+    private function determinarTipoCobranza($detallesCobranza)
+    {
+        $hayCredito = false;
+        $hayAporte = false;
+
+        foreach ($detallesCobranza as $detalle) {
+            if ($detalle->montocredito > 0) {
+                $hayCredito = true;
+            }
+            if ($detalle->montoaporte > 0) {
+                $hayAporte = true;
+            }
+        }
+
+        if ($hayCredito && $hayAporte) {
+            return 'CREDITO + APORTE';
+        } elseif ($hayCredito) {
+            return 'CREDITO';
+        } elseif ($hayAporte) {
+            return 'APORTE';
+        }
+
+        return 'N/A'; // Si no hay ni crédito ni aporte
     }
 
     public function searchCobranza(Request $request)
@@ -265,12 +304,12 @@ class AppController extends ApiController
         if ($socio) {
             // Obtener todos los recibos únicos agrupados por idsocio y recibo
             $recibos = CobranzaMercado::where('cobranza_mercado.idsocio', $socio->idsocio)
-                    ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
-                    ->select('recibo', 'idsocio', 'fecha') // Seleccionar recibo, idsocio y fecha
-                    ->distinct() // Asegurarse de no repetir recibos
-                    ->orderBy('fecha', 'desc') // Ordenar por la fecha más reciente
-                    ->limit(100) // Limitar a los 100 recibos más recientes
-                    ->get();
+                ->where('cobranza_mercado.eseliminado', 0) // Filtrar registros no eliminados
+                ->select('recibo', 'idsocio', 'fecha') // Seleccionar recibo, idsocio y fecha
+                ->distinct() // Asegurarse de no repetir recibos
+                ->orderBy('fecha', 'desc') // Ordenar por la fecha más reciente
+                ->limit(100) // Limitar a los 100 recibos más recientes
+                ->get();
 
             // Recorrer los recibos y obtener los detalles de las cobranzas asociadas a cada uno
             foreach ($recibos as $recibo) {
