@@ -147,7 +147,7 @@ class AppController extends ApiController
 
                         $cobranzaCredito->save();
                         $lastItem++;
-                        $cobranzas_mercado[] = $cobranzaCredito;
+                        $cobranzas_mercado[] = $cobranzaCredito;  // Añadir a los detalles de la cobranza
                     }
                 }
 
@@ -170,6 +170,7 @@ class AppController extends ApiController
                     ]);
 
                     $cobranza_aporte->save();
+                    $cobranzas_mercado[] = $cobranza_aporte;  // Añadir también el aporte a los detalles de la cobranza
                 }
             });
 
@@ -187,14 +188,15 @@ class AppController extends ApiController
                 'moneda' => '1', // Puedes ajustar según la moneda que necesites (1: soles, 2: dólares)
                 'total' => $totalRecibo, // Total del recibo
                 'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
+                'representante' => $detallesCobranza->first()->nom_representante ?? 'N/A', // Representante
                 'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
-                'detalles' => $cobranzas_mercado // Detalles de las cobranzas
+                'detalles' => $cobranzas_mercado, // Detalles de las cobranzas, incluyendo créditos y aporte
+                'socio' => $socio
             ]);
         } catch (\Exception $e) {
             return $this->errorResponse('Ocurrió un error al procesar la transacción: ' . $e->getMessage(), 500);
         }
     }
-
 
     public function history(Request $request)
     {
@@ -248,6 +250,7 @@ class AppController extends ApiController
                 'moneda' => $detallesCobranza->first()->moneda ?? '1', // Moneda del primer registro
                 'total' => $totalRecibo, // Total del recibo
                 'fecha' => $recibo->fecha,
+                'representante' => $ususariocobranza->nom_representante ?? 'N/A', // Representante
                 'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null,
                 'detalles' => $detallesCobranza,
             ];
