@@ -13,6 +13,8 @@ class CobranzaMercado extends Model
     protected $connection = 'sqlsrv';
     protected $table = "cobranza_mercado";
 
+    protected $primaryKey = null;
+    public $incrementing = false; // No se usa auto-incremento
 
     protected $fillable = [
         'fecha',
