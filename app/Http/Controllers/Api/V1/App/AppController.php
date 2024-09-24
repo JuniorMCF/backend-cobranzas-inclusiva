@@ -348,46 +348,39 @@ class AppController extends ApiController
     }
 
     public function deleteCobranza(Request $request)
-    {
-        // Validamos que se envíen los campos idsocio, idcredito, item e idusuariomodifica
-        $validator = Validator::make($request->all(), [
-            'idsocio' => 'required|exists:socio,idsocio',
-            'idcredito' => 'required|exists:credito,idcredito',
-            'item' => 'required|numeric',
-            'idusuariomodifica' => 'required|exists:usuarios,id_usuario'
-        ]);
+{
+    // Validamos que se envíen los campos recibo
+    $validator = Validator::make($request->all(), [
+        'recibo' => 'required',
+        'idusuariomodifica' => 'required|exists:usuarios,id_usuario'
+    ]);
 
-        if ($validator->fails()) {
-            return $this->errorResponse($validator->errors()->all(), 422);
-        }
+    if ($validator->fails()) {
+        return $this->errorResponse($validator->errors()->all(), 422);
+    }
 
-        $idsocio = $request->idsocio;
-        $idcredito = $request->idcredito;
-        $item = $request->item;
-        $idusuariomodifica = $request->idusuariomodifica;
+    $recibo = $request->recibo;
+    $idusuariomodifica = $request->idusuariomodifica;
 
-        // Buscar la cobranza por idsocio, idcredito e item
-        $cobranza = CobranzaMercado::where('idsocio', $idsocio)
-            ->where('idcredito', $idcredito)
-            ->where('item', $item)
-            ->first();
+    // Buscar todas las cobranzas que coincidan con el recibo
+    $cobranzas = CobranzaMercado::where('recibo', $recibo)->get();
 
-        if (!$cobranza) {
-            return $this->errorResponse('Cobranza no encontrada', 404);
-        }
+    if ($cobranzas->isEmpty()) {
+        return $this->errorResponse('Cobranza no encontrada', 404);
+    }
 
-        // Cambiar el estado de eseliminado a 1 y actualizar la información de modificación
+    // Marcar todas las cobranzas con el mismo recibo como eliminadas
+    foreach ($cobranzas as $cobranza) {
         $cobranza->eseliminado = 1;
         $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
         $cobranza->fechamodifica = Carbon::now()->format('d/m/Y H:i:s'); // Actualizar la fecha de modificación
         $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
         $cobranza->save();
-
-        // No se actualizará el total, solo se marca como eliminado
-
-        return $this->successResponse('Cobranza eliminada exitosamente');
     }
 
+    // Retornar respuesta exitosa
+    return $this->successResponse('Todas las cobranzas con recibo ' . $recibo . ' fueron marcadas como eliminadas.');
+}
     // Función para determinar el tipo de cobranza
     private function determinarTipoCobranza($detallesCobranza)
     {
