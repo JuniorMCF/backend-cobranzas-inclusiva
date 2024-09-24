@@ -373,44 +373,24 @@ class AppController extends ApiController
         $fecha = $request->fecha;
         $idusuariomodifica = $usuariocobranza->id_usuario;
 
-        // Log de los valores que se intentan guardar
-        Log::info('Valores para eliminar cobranza', [
-            'recibo' => $recibo,
-            'idsocio' => $idsocio,
-            'fecha' => $fecha,
-            'idusuariomodifica' => $idusuariomodifica,
-            'ipmodifica' => $request->ip(),
-            'fechamodifica' => Carbon::now()->format('Y-m-d H:i:s')
-        ]);
-
-        // Buscar todas las cobranzas que coincidan con el recibo, el idsocio y la fecha
-        $cobranzas = CobranzaMercado::where('recibo', $recibo)
+        $updatedRows = CobranzaMercado::where('recibo', $recibo)
             ->where('idsocio', $idsocio)
-            ->whereDate('fecha', $fecha) // Aseguramos que la fecha coincida exactamente
-            ->get();
-
-        if ($cobranzas->isEmpty()) {
-            return $this->errorResponse('Cobranza no encontrada para este socio, recibo y fecha', 404);
-        }
-
-        // Marcar todas las cobranzas con el mismo recibo, idsocio y fecha como eliminadas
-        foreach ($cobranzas as $cobranza) {
-            $cobranza->eseliminado = 1;
-            $cobranza->idusuariomodifica = $idusuariomodifica;
-
-            // Formatear explícitamente la fecha en el formato correcto para SQL Server
-            $fechamodifica = Carbon::now()->format('Y-m-d H:i:s');
-            $cobranza->fechamodifica = $fechamodifica;
-
-            $cobranza->ipmodifica = $request->ip();
-
-            // Registrar en el log antes de guardar
-            Log::info('Guardando cobranza', [
-                'cobranza_id' => $cobranza->id,
-                'fechamodifica' => $fechamodifica
+            ->whereDate('fecha', $fecha)
+            ->update([
+                'eseliminado' => 1,
+                'idusuariomodifica' => $idusuariomodifica,
+                'fechamodifica' => Carbon::now()->format('Y-m-d H:i:s'),
+                'ipmodifica' => $request->ip()
             ]);
 
-            $cobranza->save();
+        if ($updatedRows > 0) {
+            Log::info("Cobranza actualizada correctamente: ", [
+                'recibo' => $recibo,
+                'idsocio' => $idsocio,
+                'fecha' => $fecha
+            ]);
+        } else {
+            Log::error("Error actualizando cobranza.");
         }
 
         // Retornar respuesta exitosa
