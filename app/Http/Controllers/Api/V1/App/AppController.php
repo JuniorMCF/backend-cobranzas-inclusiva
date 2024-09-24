@@ -349,79 +349,78 @@ class AppController extends ApiController
     }
 
     public function deleteCobranza(Request $request)
-{
-    // Validamos que se envíen los campos recibo, idsocio y fecha
-    $validator = Validator::make($request->all(), [
-        'recibo' => 'required',
-        'idsocio' => 'required|exists:socio,idsocio', // Validamos que el idsocio exista en la tabla socio
-        'fecha' => 'required|date', // Validamos que la fecha sea un campo de tipo fecha
-    ]);
-
-    if ($validator->fails()) {
-        return $this->errorResponse($validator->errors()->all(), 422);
-    }
-
-    try {
-        // Obtener el usuario autenticado
-        $authHeader = $request->header('Authorization');
-        list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
-
-        // Obtener información del usuario y cobranza
-        $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
-        if (!$cobranzaalta) {
-            return $this->errorResponse('Usuario no encontrado', 404);
-        }
-
-        $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
-        if (!$usuariocobranza) {
-            return $this->errorResponse('Información del usuario no encontrada', 404);
-        }
-
-        // Parámetros para la actualización
-        $recibo = $request->recibo;
-        $idsocio = $request->idsocio;
-        $fecha = $request->fecha;
-        $idusuariomodifica = $usuariocobranza->id_usuario;
-
-        // Actualizamos las cobranzas que coincidan con los parámetros
-        $updatedRows = CobranzaMercado::where('recibo', $recibo)
-            ->where('idsocio', $idsocio)
-            ->whereDate('fecha', $fecha)
-            ->update([
-                'eseliminado' => 1,
-                'idusuariomodifica' => $idusuariomodifica,
-                'fechamodifica' => Carbon::now()->format('Y-m-d H:i:s'),
-                'ipmodifica' => $request->ip()
-            ]);
-
-        // Si no se actualizan filas, lanzamos un error
-        if ($updatedRows > 0) {
-            Log::info("Cobranza actualizada correctamente", [
-                'recibo' => $recibo,
-                'idsocio' => $idsocio,
-                'fecha' => $fecha,
-                'filas_actualizadas' => $updatedRows
-            ]);
-
-            return $this->successResponse('Todas las cobranzas con recibo ' . $recibo . ', socio ' . $idsocio . ' y fecha ' . $fecha . ' fueron marcadas como eliminadas.');
-        } else {
-            Log::error("No se encontraron cobranzas para actualizar.", [
-                'recibo' => $recibo,
-                'idsocio' => $idsocio,
-                'fecha' => $fecha
-            ]);
-            return $this->errorResponse('No se encontraron cobranzas para actualizar.', 404);
-        }
-
-    } catch (\Exception $e) {
-        // En caso de excepción, la capturamos y retornamos un error
-        Log::error("Error al intentar eliminar la cobranza", [
-            'error' => $e->getMessage()
+    {
+        // Validamos que se envíen los campos recibo, idsocio y fecha
+        $validator = Validator::make($request->all(), [
+            'recibo' => 'required',
+            'idsocio' => 'required|exists:socio,idsocio', // Validamos que el idsocio exista en la tabla socio
+            'fecha' => 'required', // Validamos que la fecha sea un campo de tipo fecha
         ]);
 
-        return $this->errorResponse('Error al intentar eliminar la cobranza.', 500);
+        if ($validator->fails()) {
+            return $this->errorResponse($validator->errors()->all(), 422);
+        }
+
+        try {
+            // Obtener el usuario autenticado
+            $authHeader = $request->header('Authorization');
+            list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
+
+            // Obtener información del usuario y cobranza
+            $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
+            if (!$cobranzaalta) {
+                return $this->errorResponse('Usuario no encontrado', 404);
+            }
+
+            $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
+            if (!$usuariocobranza) {
+                return $this->errorResponse('Información del usuario no encontrada', 404);
+            }
+
+            // Parámetros para la actualización
+            $recibo = $request->recibo;
+            $idsocio = $request->idsocio;
+            $fecha = $request->fecha;
+            $idusuariomodifica = $usuariocobranza->id_usuario;
+
+            // Actualizamos las cobranzas que coincidan con los parámetros
+            $updatedRows = CobranzaMercado::where('recibo', $recibo)
+                ->where('idsocio', $idsocio)
+                ->whereDate('fecha',  Carbon::parse($fecha)->format('Y-m-d H:i:s'))
+                ->update([
+                    'eseliminado' => 1,
+                    'idusuariomodifica' => $idusuariomodifica,
+                    'fechamodifica' => Carbon::now()->format('Y-m-d H:i:s'),
+                    'ipmodifica' => $request->ip()
+                ]);
+
+            // Si no se actualizan filas, lanzamos un error
+            if ($updatedRows > 0) {
+                Log::info("Cobranza actualizada correctamente", [
+                    'recibo' => $recibo,
+                    'idsocio' => $idsocio,
+                    'fecha' => $fecha,
+                    'filas_actualizadas' => $updatedRows
+                ]);
+
+                return $this->successResponse('Todas las cobranzas con recibo ' . $recibo . ', socio ' . $idsocio . ' y fecha ' . $fecha . ' fueron marcadas como eliminadas.');
+            } else {
+                Log::error("No se encontraron cobranzas para actualizar.", [
+                    'recibo' => $recibo,
+                    'idsocio' => $idsocio,
+                    'fecha' => $fecha
+                ]);
+                return $this->errorResponse('No se encontraron cobranzas para actualizar.', 404);
+            }
+        } catch (\Exception $e) {
+            // En caso de excepción, la capturamos y retornamos un error
+            Log::error("Error al intentar eliminar la cobranza", [
+                'error' => $e->getMessage()
+            ]);
+
+            return $this->errorResponse('Error al intentar eliminar la cobranza.', 500);
+        }
     }
-}
 
     // Función para determinar el tipo de cobranza
     private function determinarTipoCobranza($detallesCobranza)
