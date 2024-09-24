@@ -372,17 +372,10 @@ class AppController extends ApiController
         $fecha = $request->fecha;
         $idusuariomodifica = $usuariocobranza->id_usuario;
 
-        // Asegurarse de que la fecha esté en el formato correcto
-        try {
-            $fechaFormateada = Carbon::parse($fecha)->toDateTimeString(); // Usamos toDateTimeString()
-        } catch (\Exception $e) {
-            return $this->errorResponse('Formato de fecha inválido', 422);
-        }
-
         // Buscar todas las cobranzas que coincidan con el recibo, el idsocio y la fecha
         $cobranzas = CobranzaMercado::where('recibo', $recibo)
             ->where('idsocio', $idsocio)
-            ->whereDate('fecha', $fechaFormateada) // Comparamos con la fecha formateada
+            ->whereDate('fecha', $fecha) // Aseguramos que la fecha coincida exactamente
             ->get();
 
         if ($cobranzas->isEmpty()) {
@@ -392,16 +385,15 @@ class AppController extends ApiController
         // Marcar todas las cobranzas con el mismo recibo, idsocio y fecha como eliminadas
         foreach ($cobranzas as $cobranza) {
             $cobranza->eseliminado = 1;
-            $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
-            $cobranza->fechamodifica = Carbon::now()->toDateTimeString(); // Aseguramos el formato de la fecha
-            $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
+            $cobranza->idusuariomodifica = $idusuariomodifica;
+            // Convertir la fecha correctamente con Carbon
+            $cobranza->fechamodifica = Carbon::now()->format('Y-m-d H:i:s');
+            $cobranza->ipmodifica = $request->ip();
             $cobranza->save();
         }
 
-        // Retornar respuesta exitosa
         return $this->successResponse('Todas las cobranzas con recibo ' . $recibo . ', socio ' . $idsocio . ' y fecha ' . $fecha . ' fueron marcadas como eliminadas.');
     }
-
 
     // Función para determinar el tipo de cobranza
     private function determinarTipoCobranza($detallesCobranza)
