@@ -360,10 +360,10 @@ class AppController extends ApiController
             return $this->errorResponse($validator->errors()->all(), 422);
         }
 
+        // Obtener información del usuario y cobranza
         $authHeader = $request->header('Authorization');
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
 
-        // Obtener información del usuario y cobranza
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
         $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
 
@@ -386,9 +386,10 @@ class AppController extends ApiController
         foreach ($cobranzas as $cobranza) {
             $cobranza->eseliminado = 1;
             $cobranza->idusuariomodifica = $idusuariomodifica;
-            // Convertir la fecha correctamente con Carbon
-            $cobranza->fechamodifica = Carbon::now()->format('Y-m-d H:i:s');
-            $cobranza->ipmodifica = $request->ip();
+
+            // Asegurarse de que el formato de fecha sea correcto para SQL Server
+            $cobranza->fechamodifica = Carbon::now()->toDateTimeString(); // Esto formatea correctamente la fecha
+            $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
             $cobranza->save();
         }
 
