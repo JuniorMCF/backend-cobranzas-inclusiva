@@ -40,7 +40,7 @@ Route::prefix("v1")->group(function () {
         Route::post('cobranza/register',[AppController::class,'registerCobranza']);
         Route::get('cobranza/history',[AppController::class,'history']);
         Route::post('search/cobranza',[AppController::class,'searchCobranza']);
-        Route::post('cobranza/delete',[AppController::class,'deleteCobranza']);
+        Route::post('delete/cobranza',[AppController::class,'deleteCobranza']);
     });
 
 });
