@@ -353,7 +353,7 @@ class AppController extends ApiController
         $validator = Validator::make($request->all(), [
             'recibo' => 'required',
             'idsocio' => 'required|exists:socio,idsocio', // Validamos que el idsocio exista en la tabla socio
-            'fecha' => 'required|date', // Validamos que la fecha sea un campo de tipo fecha
+            'fecha' => 'required', // Validamos que la fecha sea un campo de tipo fecha
             'idusuariomodifica' => 'required|exists:usuarios,id_usuario'
         ]);
 
