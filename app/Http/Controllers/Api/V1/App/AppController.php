@@ -100,7 +100,7 @@ class AppController extends ApiController
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
 
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
-        $ususariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
+        $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
 
         $aporte = $request->aporte;
         $idcreditos = $request->idcreditos;
@@ -114,7 +114,7 @@ class AppController extends ApiController
         $lastRecibo = 0; // Variable para almacenar el número de recibo
 
         try {
-            DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $ususariocobranza, &$cobranzas_mercado, &$cobranza_aporte, &$lastRecibo, &$totalRecibo) {
+            DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $usuariocobranza, &$cobranzas_mercado, &$cobranza_aporte, &$lastRecibo, &$totalRecibo) {
                 // Obtener el último valor de "item" y bloquear la tabla
                 $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
                 $lastItem++;
@@ -136,7 +136,7 @@ class AppController extends ApiController
                             'montocredito' => $monto,
                             'total' => $monto,  // Guardar solo el monto de este registro
                             'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
-                            'idusuarioregistro' => $ususariocobranza->id_usuario,
+                            'idusuarioregistro' => $usuariocobranza->id_usuario,
                             'origenaplic' => 1,
                             'idoficinaregistro' => 1,
                             'esliquidado' => 0,
@@ -160,7 +160,7 @@ class AppController extends ApiController
                         'montoaporte' => $aporte,
                         'total' => $aporte,  // Guardar el aporte como total
                         'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
-                        'idusuarioregistro' => $ususariocobranza->id_usuario,
+                        'idusuarioregistro' => $usuariocobranza->id_usuario,
                         'origenaplic' => 1,
                         'idoficinaregistro' => 1,
                         'esliquidado' => 0,
@@ -212,10 +212,10 @@ class AppController extends ApiController
 
         // Obtener información del usuario y cobranza
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
-        $ususariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
+        $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
 
         // Obtener todos los recibos únicos agrupados por idsocio y recibo
-        $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $ususariocobranza->id_usuario)
+        $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $usuariocobranza->id_usuario)
             ->where('cobranza_mercado.eseliminado', 0)
             ->select('recibo', 'idsocio', 'fecha', 'fecharegistro')
             ->distinct()
@@ -354,17 +354,25 @@ class AppController extends ApiController
             'recibo' => 'required',
             'idsocio' => 'required|exists:socio,idsocio', // Validamos que el idsocio exista en la tabla socio
             'fecha' => 'required|date', // Validamos que la fecha sea un campo de tipo fecha
-            'idusuariomodifica' => 'required|exists:usuario,id_usuario' // Aseguramos que el usuario que modifica existe
+
         ]);
 
         if ($validator->fails()) {
             return $this->errorResponse($validator->errors()->all(), 422);
         }
 
+
+        $authHeader = $request->header('Authorization');
+        list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
+
+        // Obtener información del usuario y cobranza
+        $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
+        $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
+
         $recibo = $request->recibo;
         $idsocio = $request->idsocio;
         $fecha = $request->fecha;
-        $idusuariomodifica = $request->idusuariomodifica;
+        $idusuariomodifica = $usuariocobranza->id_usuario;
 
         // Buscar todas las cobranzas que coincidan con el recibo, el idsocio y la fecha
         $cobranzas = CobranzaMercado::where('recibo', $recibo)
