@@ -386,11 +386,10 @@ class AppController extends ApiController
             // Actualizamos las cobranzas que coincidan con los parámetros
             $updatedRows = CobranzaMercado::where('recibo', $recibo)
                 ->where('idsocio', $idsocio)
-                ->whereDate('fecha',  Carbon::parse($fecha)->format('Y-m-d'))
                 ->update([
                     'eseliminado' => 1,
                     'idusuariomodifica' => $idusuariomodifica,
-                    'fechamodifica' => Carbon::now()->format('Y-m-d H:i:s'),
+                    'fechamodifica' => Carbon::now()->format('Y-m-d'),
                     'ipmodifica' => $request->ip()
                 ]);
 
