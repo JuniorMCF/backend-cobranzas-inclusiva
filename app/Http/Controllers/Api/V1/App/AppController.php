@@ -353,8 +353,8 @@ class AppController extends ApiController
         $validator = Validator::make($request->all(), [
             'recibo' => 'required',
             'idsocio' => 'required|exists:socio,idsocio', // Validamos que el idsocio exista en la tabla socio
-            'fecha' => 'required', // Validamos que la fecha sea un campo de tipo fecha
-            'idusuariomodifica' => 'required'
+            'fecha' => 'required|date', // Validamos que la fecha sea un campo de tipo fecha
+            'idusuariomodifica' => 'required|exists:usuario,id_usuario' // Aseguramos que el usuario que modifica existe
         ]);
 
         if ($validator->fails()) {
@@ -380,7 +380,7 @@ class AppController extends ApiController
         foreach ($cobranzas as $cobranza) {
             $cobranza->eseliminado = 1;
             $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
-            $cobranza->fechamodifica = Carbon::now()->format('d/m/Y H:i:s'); // Actualizar la fecha de modificación
+            $cobranza->fechamodifica = Carbon::now()->format('Y-m-d H:i:s'); // Actualizar la fecha de modificación
             $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
             $cobranza->save();
         }
