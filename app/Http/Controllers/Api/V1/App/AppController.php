@@ -360,10 +360,10 @@ class AppController extends ApiController
             return $this->errorResponse($validator->errors()->all(), 422);
         }
 
-        // Obtener información del usuario y cobranza
         $authHeader = $request->header('Authorization');
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
 
+        // Obtener información del usuario y cobranza
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
         $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
 
@@ -371,6 +371,16 @@ class AppController extends ApiController
         $idsocio = $request->idsocio;
         $fecha = $request->fecha;
         $idusuariomodifica = $usuariocobranza->id_usuario;
+
+        // Log de los valores que se intentan guardar
+        Log::info('Valores para eliminar cobranza', [
+            'recibo' => $recibo,
+            'idsocio' => $idsocio,
+            'fecha' => $fecha,
+            'idusuariomodifica' => $idusuariomodifica,
+            'ipmodifica' => $request->ip(),
+            'fechamodifica' => Carbon::now()->format('Y-m-d H:i:s')
+        ]);
 
         // Buscar todas las cobranzas que coincidan con el recibo, el idsocio y la fecha
         $cobranzas = CobranzaMercado::where('recibo', $recibo)
@@ -387,12 +397,22 @@ class AppController extends ApiController
             $cobranza->eseliminado = 1;
             $cobranza->idusuariomodifica = $idusuariomodifica;
 
-            // Asegurarse de que el formato de fecha sea correcto para SQL Server
-            $cobranza->fechamodifica = Carbon::now()->toDateTimeString(); // Esto formatea correctamente la fecha
-            $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
+            // Formatear explícitamente la fecha en el formato correcto para SQL Server
+            $fechamodifica = Carbon::now()->format('Y-m-d H:i:s');
+            $cobranza->fechamodifica = $fechamodifica;
+
+            $cobranza->ipmodifica = $request->ip();
+
+            // Registrar en el log antes de guardar
+            Log::info('Guardando cobranza', [
+                'cobranza_id' => $cobranza->id,
+                'fechamodifica' => $fechamodifica
+            ]);
+
             $cobranza->save();
         }
 
+        // Retornar respuesta exitosa
         return $this->successResponse('Todas las cobranzas con recibo ' . $recibo . ', socio ' . $idsocio . ' y fecha ' . $fecha . ' fueron marcadas como eliminadas.');
     }
 
