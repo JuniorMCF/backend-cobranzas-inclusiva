@@ -354,13 +354,11 @@ class AppController extends ApiController
             'recibo' => 'required',
             'idsocio' => 'required|exists:socio,idsocio', // Validamos que el idsocio exista en la tabla socio
             'fecha' => 'required|date', // Validamos que la fecha sea un campo de tipo fecha
-
         ]);
 
         if ($validator->fails()) {
             return $this->errorResponse($validator->errors()->all(), 422);
         }
-
 
         $authHeader = $request->header('Authorization');
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
@@ -373,11 +371,18 @@ class AppController extends ApiController
         $idsocio = $request->idsocio;
         $fecha = $request->fecha;
         $idusuariomodifica = $usuariocobranza->id_usuario;
-        $fechaFormateada = Carbon::parse($fecha)->format('Y-m-d H:i:s');
+
+        // Asegurarse de que la fecha esté en el formato correcto
+        try {
+            $fechaFormateada = Carbon::parse($fecha)->toDateTimeString(); // Usamos toDateTimeString()
+        } catch (\Exception $e) {
+            return $this->errorResponse('Formato de fecha inválido', 422);
+        }
+
         // Buscar todas las cobranzas que coincidan con el recibo, el idsocio y la fecha
         $cobranzas = CobranzaMercado::where('recibo', $recibo)
             ->where('idsocio', $idsocio)
-            ->whereDate('fecha', $fechaFormateada) // Aseguramos que la fecha coincida exactamente
+            ->whereDate('fecha', $fechaFormateada) // Comparamos con la fecha formateada
             ->get();
 
         if ($cobranzas->isEmpty()) {
@@ -388,7 +393,7 @@ class AppController extends ApiController
         foreach ($cobranzas as $cobranza) {
             $cobranza->eseliminado = 1;
             $cobranza->idusuariomodifica = $idusuariomodifica; // Guardar el usuario que realiza la modificación
-            $cobranza->fechamodifica = Carbon::now()->format('Y-m-d H:i:s'); // Actualizar la fecha de modificación
+            $cobranza->fechamodifica = Carbon::now()->toDateTimeString(); // Aseguramos el formato de la fecha
             $cobranza->ipmodifica = $request->ip(); // Guardar la IP del cliente que realiza la modificación
             $cobranza->save();
         }
@@ -396,6 +401,7 @@ class AppController extends ApiController
         // Retornar respuesta exitosa
         return $this->successResponse('Todas las cobranzas con recibo ' . $recibo . ', socio ' . $idsocio . ' y fecha ' . $fecha . ' fueron marcadas como eliminadas.');
     }
+
 
     // Función para determinar el tipo de cobranza
     private function determinarTipoCobranza($detallesCobranza)
