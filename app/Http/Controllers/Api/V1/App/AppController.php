@@ -373,11 +373,11 @@ class AppController extends ApiController
         $idsocio = $request->idsocio;
         $fecha = $request->fecha;
         $idusuariomodifica = $usuariocobranza->id_usuario;
-
+        $fechaFormateada = Carbon::parse($fecha)->format('Y-m-d H:i:s');
         // Buscar todas las cobranzas que coincidan con el recibo, el idsocio y la fecha
         $cobranzas = CobranzaMercado::where('recibo', $recibo)
             ->where('idsocio', $idsocio)
-            ->whereDate('fecha', $fecha) // Aseguramos que la fecha coincida exactamente
+            ->whereDate('fecha', $fechaFormateada) // Aseguramos que la fecha coincida exactamente
             ->get();
 
         if ($cobranzas->isEmpty()) {
