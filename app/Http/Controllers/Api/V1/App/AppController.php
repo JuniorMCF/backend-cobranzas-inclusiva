@@ -354,7 +354,7 @@ class AppController extends ApiController
             'recibo' => 'required',
             'idsocio' => 'required|exists:socio,idsocio', // Validamos que el idsocio exista en la tabla socio
             'fecha' => 'required', // Validamos que la fecha sea un campo de tipo fecha
-            'idusuariomodifica' => 'required|exists:usuarios,id_usuario'
+            'idusuariomodifica' => 'required'
         ]);
 
         if ($validator->fails()) {
