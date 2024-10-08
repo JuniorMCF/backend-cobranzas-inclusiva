@@ -118,11 +118,14 @@ class AppController extends ApiController
             DB::transaction(function () use ($request, $aporte, $idcreditos, $montos, $idsocio, $usuariocobranza, &$cobranzas_mercado, &$cobranza_aporte, &$lastRecibo, &$totalRecibo) {
                 // Obtener el último valor de "item" y bloquear la tabla
                 $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
-                $lastItem++;
-
-                // Obtener el último número de recibo para el socio
-                $lastRecibo = CobranzaMercado::where('idsocio', $idsocio)->max('recibo') ?? 0;
-                $lastRecibo++;
+                $lastItem = (int) $lastItem;
+                $lastItem++;  // Incrementar el número de recibo de forma segura
+                // Obtener el último número de recibo para el socio y bloquear la tabla
+                $lastRecibo = CobranzaMercado::where('idsocio', $idsocio)
+                    ->lockForUpdate()  // Asegurar que el valor está bloqueado para actualizar
+                    ->max('recibo') ?? 0;
+                $lastRecibo = (int) $lastRecibo;
+                $lastRecibo++;  // Incrementar el número de recibo de forma segura
 
                 // Guardar cobranza de créditos
                 foreach ($idcreditos as $index => $idCredito) {
