@@ -35,12 +35,25 @@ class AppController extends ApiController
         }
         $searchTerm = $request->search;
         /**buscamos al socio por dni o idsocio */
-        $socio = Socio::where(function ($query) use ($searchTerm) {
-            $query->where('dni', '=',  $searchTerm)
-                ->orWhere('idsocio', '=', $searchTerm);
-        })
-            ->where('idtipopersona', 1) // socios
-            ->first();
+        $socioQuery = Socio::query()->where('idtipopersona', 1); // socios activos
+
+        if (is_numeric($searchTerm)) {
+            $socioQuery->where(function ($query) use ($searchTerm) {
+                $query->where('dni', '=', $searchTerm)
+                    ->orWhere('idsocio', '=', $searchTerm);
+            });
+        } else {
+            $keywords = preg_split('/\s+/', trim($searchTerm)); // separar por espacio
+            foreach ($keywords as $word) {
+                $socioQuery->where(function ($query) use ($word) {
+                    $query->where('nom', 'like', "%$word%")
+                        ->orWhere('ap', 'like', "%$word%")
+                        ->orWhere('am', 'like', "%$word%");
+                });
+            }
+        }
+
+        $socio = $socioQuery->first();
 
         $credits = [];
 
@@ -75,13 +88,105 @@ class AppController extends ApiController
                 AND cre.idsocio = ?
                 ORDER BY cre.idsocio
             ", [$socio->idsocio, $socio->idsocio]);
+            foreach ($credits as $credit) {
+                $idcredito = $credit->idcredito;
+                $numcrono = $credit->numcrono;
+                $cron_credit = DB::select("
+                SELECT *
+                FROM credito_cronograma
+                WHERE idcredito = ? and idsocio = ? and numcrono = ?
+            ", [$idcredito, $socio->idsocio, $numcrono]);
+                $credit->cronogramas = $cron_credit;
+            }
+
+            foreach ($credits as $credit) {
+                $idcredito = $credit->idcredito;
+                $movimiento = DB::select("
+               SELECT
+                    idcredito AS ID_CREDITO,
+                    idsocio AS ID_SOCIO,
+                    concepto AS CONCEPTO,
+                    LEFT(DATENAME(WEEKDAY, fecha), 3) + ' ' +
+                    CONVERT(varchar(2), DAY(fecha)) + ' ' +
+                    LEFT(DATENAME(MONTH, fecha), 3) + ' ' +
+                    CONVERT(varchar(4), YEAR(fecha)) AS FECHA_AMORTIZACION,
+                    totalrecibo AS MONTO_AMORTIZACION,
+                    CASE
+                        WHEN LEFT(hora, 2) > '12' THEN RIGHT('0' + CAST(LEFT(hora, 2) - 12 AS VARCHAR(2)), 2) + ':' + SUBSTRING(hora, 4, 2) + ' pm'
+                        ELSE RIGHT('0' + CAST(LEFT(hora, 2) AS VARCHAR(2)), 2) + ':' + SUBSTRING(hora, 4, 2) + ' am'
+                    END AS HORA_AMORTIZACION,
+                    fecha AS FECHA_RAW,
+                    hora AS HORA_RAW,
+                    tipomov
+                FROM pagocredito
+                WHERE idcredito = ? and idsocio = ?
+                ORDER BY fecha DESC, hora DESC
+            ", [$idcredito, $socio->idsocio]);
+                $credit->movimientos = $movimiento;
+            }
+            $savers = Saving::leftJoin("tipoahorro", "ahorro.idtipoahorro", "=", "tipoahorro.idtipoahorro")
+                ->leftJoin("periodicidad", "ahorro.idperiodic_pagointeres", "=", "periodicidad.idperiodicidad")
+                ->where("ahorro.escancelado", 0)
+                ->where("ahorro.idtipoahorro", 1) // ✅ solo tipo de ahorro 1
+                ->where("ahorro.saldo", ">", 0)    // ✅ solo saldos positivos
+                ->where("ahorro.idsocio", $socio->idsocio)
+                ->select(
+                    "ahorro.*",
+                    "tipoahorro.nom as TIPO_AHORRO",
+                    "tipoahorro.idtipoahorro",
+                    "periodicidad.nom"
+                )
+                ->orderBy("ahorro.fechaapertura", "asc")
+                ->get();
+
+            foreach ($savers as $saver) {
+                $idahorro = $saver->idahorro;
+
+                $cron_saver = DB::select("
+                    SELECT *
+                    FROM ahorro_cronograma
+                    WHERE idahorro = ? AND idsocio = ?
+                ", [$idahorro, $socio->idsocio]);
+
+                $saver->cronogramas = $cron_saver;
+
+                $mov_saver = DB::select("
+                    SELECT *
+                    FROM pagoahorro
+                    WHERE idahorro = ? AND idsocio = ?
+                    ORDER BY fecha DESC, hora DESC
+                ", [$idahorro, $socio->idsocio]);
+
+                $saver->movimientos = $mov_saver;
+
+                foreach ($saver->movimientos as $mov) {
+                    $fecha = Carbon::parse($mov->fecha);
+                    $hora = Carbon::parse($mov->hora);
+                    $transaction = [
+                        "tipo" => "Ahorro",
+                        "tipomov" => $mov->tipomov,
+                        "concepto" => ucfirst(strtolower($mov->concepto)),
+                        "moneda" => $saver->moneda,
+                        "saldo" => $mov->total,
+                        "fecha" => $fecha->translatedFormat('D d M Y'),
+                        "hora" => $hora->translatedFormat('h:i A'),
+                        "fecha_carbon" => $fecha,
+                        "hora_carbon" => $hora,
+                    ];
+                    $last_transactions[] = $transaction;
+                }
+            }
+            return $this->successResponse([
+                'socio' => $socio,
+                'creditos' => $credits,
+                'savers' => $savers,
+            ]);
         }
 
-
-
         return $this->successResponse([
-            'socio' => $socio,
-            'creditos' => $credits
+            'socio' => null,
+            'creditos' => [],
+            'savers' => [],
         ]);
     }
     public function registerCobranza(Request $request)
@@ -207,23 +312,118 @@ class AppController extends ApiController
             return $this->errorResponse('Ocurrió un error al procesar la transacción: ' . $e->getMessage(), 500);
         }
     }
+    public function registerAhorro(Request $request)
+    {
+        $validator = Validator::make($request->all(), [
+            'idahorros' => 'required|array',
+            'montos' => 'required|array',
+            'idtipoahorros' => 'required|array',
+            'idsocio' => 'required',
+        ]);
 
+        if ($validator->fails()) {
+            return $this->errorResponse($validator->errors()->all(), 422);
+        }
+
+        $authHeader = $request->header('Authorization');
+        list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
+
+        $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
+        $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
+
+        $idahorros = $request->idahorros;
+        $montos = $request->montos;
+        $idtipoahorros = $request->idtipoahorros;
+        $idsocio = $request->idsocio;
+
+        $totalRecibo = array_sum($montos);
+        $cobranzas_mercado = [];
+        $lastRecibo = 0;
+
+        try {
+            DB::transaction(function () use ($request, $idahorros, $montos, $idtipoahorros, $idsocio, $usuariocobranza, &$cobranzas_mercado, &$lastRecibo, $totalRecibo) {
+                $lastItem = DB::table('cobranza_mercado')->lockForUpdate()->max('item') ?? 0;
+                $lastItem++;
+
+                $lastRecibo = CobranzaMercado::where('idsocio', $idsocio)
+                    ->lockForUpdate()
+                    ->max('recibo') ?? 0;
+                $lastRecibo++;
+
+                foreach ($idahorros as $index => $idAhorro) {
+                    $monto = $montos[$index];
+                    $idtipoahorro = $idtipoahorros[$index];
+
+                    if ($monto != 0) {
+                        $cobranzaAhorro = new CobranzaMercado([
+                            'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
+                            'item' => $lastItem,
+                            'idsocio' => $idsocio,
+                            'idahorro' => $idAhorro,
+                            'idtipoahorro' => $idtipoahorro,
+                            'montoahorro' => $monto,
+                            'total' => $monto,
+                            'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
+                            'idusuarioregistro' => $usuariocobranza->id_usuario,
+                            'origenaplic' => 1,
+                            'idoficinaregistro' => 1,
+                            'esliquidado' => 0,
+                            'eseliminado' => 0,
+                            'ipregistro' => $request->ip() ?? $request->telefono,
+                            'recibo' => $lastRecibo
+                        ]);
+
+                        $cobranzaAhorro->save();
+                        $cobranzas_mercado[] = $cobranzaAhorro;
+                        $lastItem++;
+                    }
+                }
+            });
+
+            $socio = Socio::where('idsocio', $idsocio)->first();
+            $representante = Usuario::where('id_usuario', $cobranzas_mercado[0]->idusuarioregistro)
+                ->select('nombrelargo as nom_representante')
+                ->first()
+                ->nom_representante ?? 'N/A';
+
+            return $this->successResponse([
+                'recibo' => $lastRecibo,
+                'idsocio' => $socio->idsocio,
+                'nom_socio' => $socio->nom ?? '',
+                'ap_socio' => $socio->ap ?? '',
+                'am_socio' => $socio->am ?? '',
+                'tipo' => 'AHORRO',
+                'moneda' => '1',
+                'total' => $totalRecibo,
+                'fecha' => Carbon::now()->format('d/m/Y H:i:s'),
+                'representante' => $representante,
+                'fecharegistro' => Carbon::now()->format('d/m/Y H:i:s'),
+                'detalles' => $cobranzas_mercado,
+                'socio' => $socio
+            ]);
+        } catch (\Exception $e) {
+            return $this->errorResponse('Ocurrió un error al registrar el ahorro: ' . $e->getMessage(), 500);
+        }
+    }
     public function history(Request $request)
     {
         // Obtener el usuario desde el header Authorization
         $authHeader = $request->header('Authorization');
         list($login, $password) = explode(':', base64_decode(substr($authHeader, 6)));
 
-        // Obtener información del usuario y cobranza
         $cobranzaalta = CobranzaAlta::where('dni', $login)->first();
         $usuariocobranza = Usuario::where('idsocio', $cobranzaalta->idsocio)->first();
 
-        // Obtener todos los recibos únicos agrupados por idsocio y recibo
-        $recibos = CobranzaMercado::where('cobranza_mercado.idusuarioregistro', $usuariocobranza->id_usuario)
-            ->where('cobranza_mercado.eseliminado', 0)
+        // Obtener la fecha actual en formato compatible
+        $fechaHoy = Carbon::now()->format('d/m/Y');
+
+        // Traer los recibos del día actual hechos por el usuario
+        $recibos = CobranzaMercado::whereDate(DB::raw("STR_TO_DATE(fecha, '%d/%m/%Y')"), Carbon::today())
+            ->where('idusuarioregistro', $usuariocobranza->id_usuario)
+            ->where('eseliminado', 0)
             ->select('recibo', 'idsocio', 'fecha', 'fecharegistro')
             ->distinct()
-            ->orderBy('cobranza_mercado.fecha', 'desc')
+            ->orderBy('fecha', 'desc')
             ->limit(50)
             ->get();
 
@@ -248,8 +448,6 @@ class AppController extends ApiController
                 ->get();
 
             $tipoCobranza = $this->determinarTipoCobranza($detallesCobranza);
-
-            // Sumar los totales de los registros asociados al recibo
             $totalRecibo = $detallesCobranza->sum('total');
 
             $historial[] = [
@@ -259,10 +457,10 @@ class AppController extends ApiController
                 'ap_socio' => $detallesCobranza->first()->ap_socio ?? '',
                 'am_socio' => $detallesCobranza->first()->am_socio ?? '',
                 'tipo' => $tipoCobranza,
-                'moneda' => $detallesCobranza->first()->moneda ?? '1', // Moneda del primer registro
-                'total' => $totalRecibo, // Total del recibo
+                'moneda' => $detallesCobranza->first()->moneda ?? '1',
+                'total' => $totalRecibo,
                 'fecha' => $recibo->fecha,
-                'representante' => $detallesCobranza->first()->nom_representante ?? 'N/A', // Representante
+                'representante' => $detallesCobranza->first()->nom_representante ?? 'N/A',
                 'fecharegistro' => $detallesCobranza->first()->fecharegistro ?? null,
                 'detalles' => $detallesCobranza,
             ];
@@ -270,6 +468,7 @@ class AppController extends ApiController
 
         return $this->successResponse($historial);
     }
+
 
 
 
@@ -430,24 +629,34 @@ class AppController extends ApiController
     {
         $hayCredito = false;
         $hayAporte = false;
+        $hayAhorro = false;
 
         foreach ($detallesCobranza as $detalle) {
-            if ($detalle->montocredito > 0) {
+            if (!empty($detalle->montocredito) && $detalle->montocredito > 0) {
                 $hayCredito = true;
             }
-            if ($detalle->montoaporte > 0) {
+            if (!empty($detalle->montoaporte) && $detalle->montoaporte > 0) {
                 $hayAporte = true;
+            }
+            if (!empty($detalle->montoahorro) && $detalle->montoahorro > 0) {
+                $hayAhorro = true;
             }
         }
 
         if ($hayCredito && $hayAporte) {
-            return 'CREDITO + APORTE';
+            return 'CRÉDITO + APORTE';
+        } elseif ($hayCredito && $hayAhorro) {
+            return 'CRÉDITO + AHORRO';
+        } elseif ($hayAporte && $hayAhorro) {
+            return 'APORTE + AHORRO';
         } elseif ($hayCredito) {
-            return 'CREDITO';
+            return 'CRÉDITO';
         } elseif ($hayAporte) {
             return 'APORTE';
+        } elseif ($hayAhorro) {
+            return 'AHORRO';
         }
 
-        return 'N/A'; // Si no hay ni crédito ni aporte
+        return 'N/A';
     }
 }

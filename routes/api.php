@@ -38,6 +38,7 @@ Route::prefix("v1")->group(function () {
     Route::prefix('app')->middleware(['auth.coop'])->group(function(){
         Route::post('search/socio',[AppController::class,'searchSocio']);
         Route::post('cobranza/register',[AppController::class,'registerCobranza']);
+        Route::post('cobranza/register-ahorro',[AppController::class,'registerAhorro']);
         Route::get('cobranza/history',[AppController::class,'history']);
         Route::post('search/cobranza',[AppController::class,'searchCobranza']);
         Route::post('delete/cobranza',[AppController::class,'deleteCobranza']);
